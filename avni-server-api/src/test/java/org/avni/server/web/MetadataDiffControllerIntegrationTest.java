@@ -2,20 +2,25 @@ package org.avni.server.web;
 
 import org.avni.server.common.AbstractControllerIntegrationTest;
 import org.junit.Test;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.core.Is.is;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 
 public class MetadataDiffControllerIntegrationTest extends AbstractControllerIntegrationTest {
 
-    @Test
-    public void shouldHitTheEndpoint() {
-        ResponseEntity<String> response = template.postForEntity("/metadata/diff", null, String.class);
-        assertThat(response.getStatusCode(), is(equalTo(HttpStatus.OK)));
+
+       @Test
+    public void testCompareMetadataZips() throws Exception {
+        setUser("demo-user");
+        MockMultipartFile file1 = new MockMultipartFile("file1", "file1.zip", MediaType.MULTIPART_FORM_DATA_VALUE, "zip file content".getBytes());
+        MockMultipartFile file2 = new MockMultipartFile("file2", "file2.zip", MediaType.MULTIPART_FORM_DATA_VALUE, "zip file content".getBytes());
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/metadata/new")
+                        .file(file1)
+                        .file(file2))
+                .andExpect(status().isOk());
     }
 }
-
-

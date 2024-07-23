@@ -49,11 +49,33 @@ public class MetadataDiffService {
             Map<String, Map<String, Object>> jsonMap1 = parseJsonFiles(commonFiles1);
             Map<String, Map<String, Object>> jsonMap2 = parseJsonFiles(commonFiles2);
 
-            Map<String, Object> differences = findDifferences(jsonMap1, jsonMap2);
+            Set<String> filenames = new HashSet<>();
+            filenames.addAll(jsonMap1.values().stream().map(file -> (String) file.get("filename")).collect(Collectors.toSet()));
+            filenames.addAll(jsonMap2.values().stream().map(file -> (String) file.get("filename")).collect(Collectors.toSet()));
 
-            result.put("differences", differences);
-            result.put("Missing File Zip1", findMissingFiles(fileNames1, fileNames2));
-            result.put("Missing File Zip2", findMissingFiles(fileNames2, fileNames1));
+            for (String filename : filenames) {
+                Map<String, Map<String, Object>> fileDifferences = findDifferences(
+                        jsonMap1.entrySet().stream()
+                                .filter(entry -> filename.equals(entry.getValue().get("filename")))
+                                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
+                        jsonMap2.entrySet().stream()
+                                .filter(entry -> filename.equals(entry.getValue().get("filename")))
+                                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))
+                );
+
+                if (!fileDifferences.isEmpty()) {
+                    result.put(filename, fileDifferences);
+                }
+            }
+
+            Set<String> set1 = findMissingFiles(fileNames1, fileNames2);
+            if(!set1.isEmpty()) {
+                result.put("Missing File Zip1", findMissingFiles(fileNames1, fileNames2));
+            }
+            Set<String> set2 = findMissingFiles(fileNames1, fileNames2);
+            if(!set2.isEmpty()) {
+                result.put("Missing File Zip1", findMissingFiles(fileNames2, fileNames1));
+            }
 
         } catch (IOException e) {
             e.printStackTrace();
@@ -105,7 +127,9 @@ public class MetadataDiffService {
         File[] files = directory.listFiles();
         if (files != null) {
             for (File file : files) {
-                if (file.isFile() && file.getName().toLowerCase().endsWith(".json")) {
+                if (file.isDirectory()) {
+                    jsonFiles.addAll(listJsonFiles(file)); // Recursively process subdirectories
+                } else if (file.isFile() && file.getName().toLowerCase().endsWith(".json")) {
                     jsonFiles.add(file);
                 }
             }
@@ -115,7 +139,17 @@ public class MetadataDiffService {
 
     private Map<String, Map<String, Object>> parseJsonFiles(List<File> files) throws IOException {
         Map<String, Map<String, Object>> jsonMap = new HashMap<>();
+
         for (File file : files) {
+            String relativePath = file.getPath().substring(file.getParentFile().getParentFile().getPath().length() + 1);
+
+            if (relativePath.startsWith("metadata-")) {
+                int startIndex = relativePath.indexOf('/', "metadata-".length());
+                     if (startIndex != -1) {
+                         relativePath = relativePath.substring(startIndex + 1);
+                     }
+             }
+
             try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                 StringBuilder jsonContent = new StringBuilder();
                 String line;
@@ -128,7 +162,7 @@ public class MetadataDiffService {
                     for (Map<String, Object> jsonObject : jsonArray) {
                         String uuid = (String) jsonObject.get("uuid");
                         if (uuid != null) {
-                            jsonObject.put("filename", file.getName());
+                            jsonObject.put("filename", relativePath);
                             jsonMap.put(uuid, jsonObject);
                         }
                     }
@@ -136,7 +170,7 @@ public class MetadataDiffService {
                     Map<String, Object> jsonObject = objectMapper.readValue(jsonContent.toString(), new TypeReference<Map<String, Object>>() {});
                     String uuid = (String) jsonObject.get("uuid");
                     if (uuid != null) {
-                        jsonObject.put("filename", file.getName());
+                        jsonObject.put("filename", relativePath);
                         jsonMap.put(uuid, jsonObject);
                     }
                 }
@@ -145,23 +179,77 @@ public class MetadataDiffService {
         return jsonMap;
     }
 
-    protected Map<String, Object> findDifferences(Map<String, Map<String, Object>> map1, Map<String, Map<String, Object>> map2) {
-        Map<String, Object> differences = new HashMap<>();
 
-        Set<String> commonUuids = map1.keySet().stream()
-                .filter(map2::containsKey)
-                .collect(Collectors.toSet());
+    protected Map<String, Map<String, Object>> findDifferences(Map<String, Map<String, Object>> map1, Map<String, Map<String, Object>> map2) {
+        Map<String, Map<String, Object>> differences = new HashMap<>();
 
-        for (String uuid : commonUuids) {
-            Map<String, Object> obj1 = map1.get(uuid);
-            Map<String, Object> obj2 = map2.get(uuid);
-            Map<String, Object> diff = findDifferencesBetweenObjects(obj1, obj2);
-            if (!diff.isEmpty()) {
-                diff.put("filename", obj1.get("filename"));
-                differences.put(uuid, diff);
+        Set<String> filenames = new HashSet<>();
+        filenames.addAll(map1.values().stream().map(file -> (String) file.get("filename")).collect(Collectors.toSet()));
+        filenames.addAll(map2.values().stream().map(file -> (String) file.get("filename")).collect(Collectors.toSet()));
+
+        for (String filename : filenames) {
+            Map<String, Object> fileDifferences = new HashMap<>();
+            Map<String, Object> modified = new HashMap<>();
+            List<Map<String, Object>> added = new ArrayList<>();
+            List<Map<String, Object>> deleted = new ArrayList<>();
+
+            Map<String, Map<String, Object>> tempMap1 = removeFilenameFromMap(map1, filename);
+            Map<String, Map<String, Object>> tempMap2 = removeFilenameFromMap(map2, filename);
+
+            List<String> uuidsInMap1 = new ArrayList<>(tempMap1.keySet());
+            List<String> uuidsInMap2 = new ArrayList<>(tempMap2.keySet());
+
+            Set<String> commonUuids = new HashSet<>(uuidsInMap1);
+            commonUuids.retainAll(uuidsInMap2);
+
+            for (String uuid : commonUuids) {
+                Map<String, Object> obj1 = tempMap1.get(uuid);
+                Map<String, Object> obj2 = tempMap2.get(uuid);
+                Map<String, Object> diff = findDifferencesBetweenObjects(obj1, obj2);
+                if (!diff.isEmpty()) {
+                    modified.put(uuid, diff);
+                }
+            }
+
+            for (String uuid : uuidsInMap2) {
+                if (!uuidsInMap1.contains(uuid)) {
+                    added.add(new HashMap<>(tempMap2.get(uuid)));
+                }
+            }
+
+            for (String uuid : uuidsInMap1) {
+                if (!uuidsInMap2.contains(uuid)) {
+                    deleted.add(new HashMap<>(tempMap1.get(uuid)));
+                }
+            }
+
+            if (!modified.isEmpty()) {
+                fileDifferences.put("modified", modified);
+            }
+            if (!added.isEmpty()) {
+                fileDifferences.put("added", added);
+            }
+            if (!deleted.isEmpty()) {
+                fileDifferences.put("deleted", deleted);
+            }
+
+            if (!fileDifferences.isEmpty()) {
+                differences.put("Differences", fileDifferences);
             }
         }
         return differences;
+    }
+
+    private Map<String, Map<String, Object>> removeFilenameFromMap(Map<String, Map<String, Object>> map, String filename) {
+        Map<String, Map<String, Object>> result = new HashMap<>();
+        for (Map.Entry<String, Map<String, Object>> entry : map.entrySet()) {
+            Map<String, Object> value = new HashMap<>(entry.getValue());
+            if (filename.equals(value.get("filename"))) {
+                value.remove("filename");
+            }
+            result.put(entry.getKey(), value);
+        }
+        return result;
     }
 
     private Map<String, Object> findDifferencesBetweenObjects(Map<String, Object> obj1, Map<String, Object> obj2) {
@@ -172,8 +260,11 @@ public class MetadataDiffService {
             Object value1 = entry.getValue();
             Object value2 = obj2.get(key);
 
-            if (!Objects.equals(value1, value2)) {
-                differences.put(key, value2);
+            if (!Objects.equals(value1, value2) && key != "id") {
+                Map<String, Object> valueDetails = new HashMap<>();
+                valueDetails.put("old_value", value1);
+                valueDetails.put("new_value", value2);
+                differences.put(key, valueDetails);
             }
         }
         return differences;

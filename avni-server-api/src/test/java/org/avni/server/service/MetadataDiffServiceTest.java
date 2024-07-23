@@ -54,7 +54,6 @@ public class MetadataDiffServiceTest {
         return new MockMultipartFile("file", zipFileName, "application/zip", zipContent);
     }
 
-    private final MetadataDiffService service = new MetadataDiffService();
 
     @Test
     public void testFindMissingFiles() {
@@ -75,50 +74,88 @@ public class MetadataDiffServiceTest {
         Set<String> expectedMissingInZip1 = new HashSet<>();
         expectedMissingInZip1.add("file4.txt");
 
-        Set<String> missingInZip2 = service.findMissingFiles(filesInZip1, filesInZip2);
-        Set<String> missingInZip1 = service.findMissingFiles(filesInZip2, filesInZip1);
+        Set<String> missingInZip2 = metadataDiffService.findMissingFiles(filesInZip1, filesInZip2);
+        Set<String> missingInZip1 = metadataDiffService.findMissingFiles(filesInZip2, filesInZip1);
 
         assertEquals(expectedMissingInZip2, missingInZip2);
         assertEquals(expectedMissingInZip1, missingInZip1);
     }
 
+
     @Test
     public void testFindDifferences() {
+        Map<String, Object> obj1 = new HashMap<>();
+        obj1.put("uuid", "123");
+        obj1.put("name", "test1");
+        obj1.put("filename", "specificFile.json");
+
+        Map<String, Object> obj2 = new HashMap<>();
+        obj2.put("uuid", "123");
+        obj2.put("name", "test2");
+        obj2.put("filename", "specificFile.json");
+
         Map<String, Map<String, Object>> map1 = new HashMap<>();
+        map1.put("123", obj1);
+
         Map<String, Map<String, Object>> map2 = new HashMap<>();
+        map2.put("123", obj2);
 
-        // Example JSON objects
-        Map<String, Object> obj1Map1 = new HashMap<>();
-        obj1Map1.put("filename", "file1.txt");
-        obj1Map1.put("field1", "value1");
-        obj1Map1.put("field2", "value2");
-        map1.put("uuid1", obj1Map1);
+        Map<String, Map<String, Object>> differences = metadataDiffService.findDifferences(map1, map2);
 
-        Map<String, Object> obj2Map1 = new HashMap<>();
-        obj2Map1.put("filename", "file2.txt");
-        obj2Map1.put("field1", "value1");
-        obj2Map1.put("field2", "valueDifferent");
-        map1.put("uuid2", obj2Map1);
+        Map<String, Object> ruleDependencyDiff = new HashMap<>();
+        ruleDependencyDiff.put("old_value", "test1");
+        ruleDependencyDiff.put("new_value", "test2");
 
-        Map<String, Object> obj1Map2 = new HashMap<>();
-        obj1Map2.put("filename", "file2.txt");
-        obj1Map2.put("field1", "value1");
-        obj1Map2.put("field2", "value2");
-        map2.put("uuid2", obj1Map2);
+        Map<String, Object> modifiedDiff = new HashMap<>();
+        modifiedDiff.put("name", ruleDependencyDiff);
 
-        Map<String, Object> obj2Map2 = new HashMap<>();
-        obj2Map2.put("filename", "file3.txt");
-        obj2Map2.put("field1", "value3");
-        obj2Map2.put("field2", "value4");
-        map2.put("uuid3", obj2Map2);
+        Map<String, Map<String, Object>> modifiedEntry = new HashMap<>();
+        modifiedEntry.put("123", modifiedDiff);
+
+        Map<String, Object> differencesEntry = new HashMap<>();
+        differencesEntry.put("modified", modifiedEntry);
 
         Map<String, Object> expectedDifferences = new HashMap<>();
-        Map<String, Object> diffForUuid2 = new HashMap<>();
-        diffForUuid2.put("field2", "value2");
-        diffForUuid2.put("filename", "file2.txt");
-        expectedDifferences.put("uuid2", diffForUuid2);
+        expectedDifferences.put("Differences", differencesEntry);
 
-        Map<String, Object> differences = service.findDifferences(map1, map2);
         assertEquals(expectedDifferences, differences);
+    }
+
+    @Test
+    public void testFindDifferencesWithAddedAndDeletedEntries() {
+        Map<String, Object> obj1 = new HashMap<>();
+        obj1.put("uuid", "123");
+        obj1.put("name", "test1");
+        obj1.put("filename", "specificFile.json");
+
+        Map<String, Object> obj2 = new HashMap<>();
+        obj2.put("uuid", "461");
+        obj2.put("name", "test2");
+        obj2.put("filename", "specificFile.json");
+
+        Map<String, Map<String, Object>> map1 = new HashMap<>();
+        map1.put("123", obj1);
+
+        Map<String, Map<String, Object>> map2 = new HashMap<>();
+        map2.put("461", obj2);
+
+        Map<String, Object> deletedEntry = new HashMap<>();
+        deletedEntry.put("name", "test1");
+        deletedEntry.put("uuid", "123");
+
+        Map<String, Object> addedEntry = new HashMap<>();
+        addedEntry.put("name", "test2");
+        addedEntry.put("uuid", "461");
+
+        Map<String, Map<String, Object>> differencesObtain = metadataDiffService.findDifferences(map1, map2);
+
+        Map<String, Object> differences = new HashMap<>();
+        differences.put("deleted", Collections.singletonList(deletedEntry));
+        differences.put("added", Collections.singletonList(addedEntry));
+
+        Map<String, Object> expectedDifferences = new HashMap<>();
+        expectedDifferences.put("Differences", differences);
+
+        assertEquals(differencesObtain, expectedDifferences);
     }
 }
